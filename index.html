@@ -10,6 +10,7 @@
     font-family: "Segoe UI", sans-serif;
     text-align: center;
     padding: 20px;
+    overflow-x: hidden; /* Prevent horizontal scrollbar */
   }
   h1 { color: #ffcc00; }
   p { color: #aaa; margin-bottom: 20px; }
@@ -31,7 +32,6 @@
     border-radius: 5px;
   }
 
-  /* Piano styling */
   .piano {
     position: relative;
     display: flex;
@@ -39,6 +39,7 @@
     margin: 40px auto;
     width: fit-content;
     user-select: none;
+    overflow: hidden; /* Prevent horizontal scrollbar from black keys */
   }
   .white {
     width: 50px;
@@ -67,7 +68,6 @@
   }
   .black.active { background: #ffcc00; }
 
-  /* Pulse animation for chord box */
   @keyframes pulse {
     0% { transform: scale(1); opacity: 1; }
     50% { transform: scale(1.1); opacity: 0.8; }
@@ -144,25 +144,35 @@ function stopNote(midi){ pianoSampler.triggerRelease(Note.fromMidi(midi)); }
 function activateKey(midi){ if(keyElements[midi]) keyElements[midi].classList.add("active"); playNote(midi);}
 function deactivateKey(midi){ if(keyElements[midi]) keyElements[midi].classList.remove("active"); stopNote(midi);}
 
+// Robust chord detection
 function detectChord(notes){
   if(notes.length===0) return {name:"",roman:"",color:"white"};
-  const pitchClasses = notes.map(n=>Note.pitchClass(n));
+  
+  // Convert to pitch classes for reliable detection
+  const pitchClasses = notes.map(n => Note.pitchClass(n));
   const detected = Chord.detect(pitchClasses);
   if(detected.length===0) return {name:"Unrecognized chord",roman:"",color:"tomato"};
 
   const chordName = detected[0];
+  
   const keyName = document.getElementById("keySelect").value;
   const [tonic, type] = keyName.split(" ");
   const scale = Scale.get(keyName).notes;
-  
-  const inKey = Chord.get(chordName).notes.every(n=>scale.includes(Note.pitchClass(n)));
+
+  const chordNotes = Chord.get(chordName).notes.map(Note.pitchClass);
+  const inKey = chordNotes.every(n => scale.includes(n));
+
   let roman = "";
   if(inKey){
-    const keyData = Key[ type==="major" ? "majorKey" : "minorKey"](tonic);
-    const harmonized = type==="major"? keyData.chords : keyData.natural.chords;
-    const idx = harmonized.findIndex(c => Chord.get(c).notes[0]===Chord.get(chordName).notes[0]);
-    if(idx>=0) roman = type==="major"? keyData.scaleDegrees[idx] : keyData.natural.scaleDegrees[idx];
+    try {
+      const keyData = type==="major"? Key.majorKey(tonic) : Key.minorKey(tonic);
+      const harmonized = type==="major"? keyData.chords : keyData.natural.chords;
+      const rootPc = chordNotes[0];
+      const idx = harmonized.findIndex(c => Chord.get(c).notes.map(Note.pitchClass)[0]===rootPc);
+      if(idx>=0) roman = type==="major"? keyData.scaleDegrees[idx] : keyData.natural.scaleDegrees[idx];
+    } catch(e){ roman=""; }
   }
+
   return {name: chordName, roman, color: inKey? "limegreen":"tomato"};
 }
 
@@ -177,7 +187,6 @@ function updateDisplay(){
   chordDiv.textContent="Chord: "+result.name;
   chordDiv.style.color=result.color;
   
-  // Pulse animation if chord changed
   if(result.name !== lastChord){
     chordDiv.classList.remove("pulse");
     void chordDiv.offsetWidth;
@@ -198,7 +207,7 @@ if(navigator.requestMIDIAccess) navigator.requestMIDIAccess().then(ma=>{
   };
 });
 
-// Computer keyboard
+// Keyboard
 window.addEventListener("keydown",e=>{
   const note=keyMap[e.key];
   if(note&&!activeNotes.has(note)){activeNotes.add(note);activateKey(note);updateDisplay();}
