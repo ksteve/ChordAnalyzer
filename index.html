@@ -1,0 +1,222 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Chord Detector 🎹</title>
+<style>
+  body {
+    background: #121212;
+    color: #eee;
+    font-family: "Segoe UI", sans-serif;
+    text-align: center;
+    padding: 20px;
+  }
+  h1 { color: #ffcc00; }
+  p { color: #aaa; margin-bottom: 20px; }
+
+  #notes, #chord, #roman {
+    margin-top: 10px;
+    font-weight: bold;
+    font-size: 1.2em;
+    transition: color 0.2s;
+  }
+
+  select {
+    font-size: 1em;
+    margin-top: 10px;
+    padding: 5px 10px;
+    background: #222;
+    color: #eee;
+    border: 1px solid #555;
+    border-radius: 5px;
+  }
+
+  /* Piano styling */
+  .piano {
+    position: relative;
+    display: flex;
+    justify-content: center;
+    margin: 40px auto;
+    width: fit-content;
+    user-select: none;
+  }
+  .white {
+    width: 50px;
+    height: 200px;
+    border: 1px solid #555;
+    background: #eee;
+    margin: 0 1px;
+    border-radius: 5px 5px 0 0;
+    position: relative;
+    z-index: 1;
+    transition: background 0.15s;
+    box-shadow: 0 4px 6px rgba(0,0,0,0.4);
+  }
+  .white.active { background: #ffcc00; }
+  .black {
+    width: 32px;
+    height: 120px;
+    background: #333;
+    position: absolute;
+    left: 35px;
+    top: 0;
+    z-index: 2;
+    border-radius: 3px;
+    box-shadow: 0 4px 6px rgba(0,0,0,0.6);
+    transition: background 0.15s;
+  }
+  .black.active { background: #ffcc00; }
+
+  /* Pulse animation for chord box */
+  @keyframes pulse {
+    0% { transform: scale(1); opacity: 1; }
+    50% { transform: scale(1.1); opacity: 0.8; }
+    100% { transform: scale(1); opacity: 1; }
+  }
+  #chord.pulse {
+    animation: pulse 0.3s ease;
+  }
+</style>
+</head>
+<body>
+<h1>Chord Detector 🎹</h1>
+<p>Play with MIDI, computer keys, or mouse clicks.</p>
+
+<label for="keySelect">Choose a key: </label>
+<select id="keySelect">
+  <option>C major</option><option>G major</option><option>D major</option>
+  <option>A major</option><option>E major</option><option>B major</option>
+  <option>F major</option><option>C minor</option><option>G minor</option>
+  <option>D minor</option><option>A minor</option><option>E minor</option>
+  <option>B minor</option><option>F minor</option>
+</select>
+
+<div id="notes">Notes: </div>
+<div id="chord">Chord: </div>
+<div id="roman">Roman numeral: </div>
+
+<div class="piano" id="piano"></div>
+
+<script src="https://cdn.jsdelivr.net/npm/@tonaljs/tonal/browser/tonal.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/tone/14.8.39/Tone.js"></script>
+<script>
+const { Note, Chord, Key, Scale } = Tonal;
+const activeNotes = new Set();
+
+const pianoSampler = new Tone.Sampler({
+  urls: {
+    "A0":"A0.mp3","C1":"C1.mp3","D#1":"Ds1.mp3","F#1":"Fs1.mp3",
+    "A1":"A1.mp3","C2":"C2.mp3","D#2":"Ds2.mp3","F#2":"Fs2.mp3",
+    "A2":"A2.mp3","C3":"C3.mp3","D#3":"Ds3.mp3","F#3":"Fs3.mp3",
+    "A3":"A3.mp3","C4":"C4.mp3","D#4":"Ds4.mp3","F#4":"Fs4.mp3",
+    "A4":"A4.mp3","C5":"C5.mp3","D#5":"Ds5.mp3","F#5":"Fs5.mp3",
+    "A5":"A5.mp3","C6":"C6.mp3","D#6":"Ds6.mp3","F#6":"Fs6.mp3",
+    "A6":"A6.mp3","C7":"C7.mp3","D#7":"Ds7.mp3","F#7":"Fs7.mp3",
+    "A7":"A7.mp3","C8":"C8.mp3"
+  },
+  release: 2,
+  baseUrl: "https://tonejs.github.io/audio/salamander/"
+}).toDestination();
+
+const keyMap = { 'a':60,'w':61,'s':62,'e':63,'d':64,'f':65,'t':66,'g':67,'y':68,'h':69,'u':70,'j':71,'k':72 };
+
+// Piano UI
+const startNote=60,numKeys=24;
+const piano=document.getElementById("piano");
+const keyElements={};
+const whiteOrder=[0,2,4,5,7,9,11];
+for(let i=0;i<numKeys;i++){
+  const midi=startNote+i;
+  const pc=midi%12;
+  if(whiteOrder.includes(pc)){
+    const w=document.createElement("div");
+    w.className="white"; w.dataset.midi=midi;
+    piano.appendChild(w); keyElements[midi]=w;
+  }else{
+    const bw=document.createElement("div");
+    bw.className="black"; bw.dataset.midi=midi;
+    piano.lastElementChild.appendChild(bw); keyElements[midi]=bw;
+  }
+}
+
+function playNote(midi){ pianoSampler.triggerAttack(Note.fromMidi(midi)); }
+function stopNote(midi){ pianoSampler.triggerRelease(Note.fromMidi(midi)); }
+function activateKey(midi){ if(keyElements[midi]) keyElements[midi].classList.add("active"); playNote(midi);}
+function deactivateKey(midi){ if(keyElements[midi]) keyElements[midi].classList.remove("active"); stopNote(midi);}
+
+function detectChord(notes){
+  if(notes.length===0) return {name:"",roman:"",color:"white"};
+  const pitchClasses = notes.map(n=>Note.pitchClass(n));
+  const detected = Chord.detect(pitchClasses);
+  if(detected.length===0) return {name:"Unrecognized chord",roman:"",color:"tomato"};
+
+  const chordName = detected[0];
+  const keyName = document.getElementById("keySelect").value;
+  const [tonic, type] = keyName.split(" ");
+  const scale = Scale.get(keyName).notes;
+  
+  const inKey = Chord.get(chordName).notes.every(n=>scale.includes(Note.pitchClass(n)));
+  let roman = "";
+  if(inKey){
+    const keyData = Key[ type==="major" ? "majorKey" : "minorKey"](tonic);
+    const harmonized = type==="major"? keyData.chords : keyData.natural.chords;
+    const idx = harmonized.findIndex(c => Chord.get(c).notes[0]===Chord.get(chordName).notes[0]);
+    if(idx>=0) roman = type==="major"? keyData.scaleDegrees[idx] : keyData.natural.scaleDegrees[idx];
+  }
+  return {name: chordName, roman, color: inKey? "limegreen":"tomato"};
+}
+
+let lastChord = "";
+
+function updateDisplay(){
+  const notes = Array.from(activeNotes).sort((a,b)=>a-b).map(Note.fromMidi);
+  document.getElementById("notes").textContent="Notes: "+notes.join(" ");
+  
+  const result = detectChord(notes);
+  const chordDiv=document.getElementById("chord");
+  chordDiv.textContent="Chord: "+result.name;
+  chordDiv.style.color=result.color;
+  
+  // Pulse animation if chord changed
+  if(result.name !== lastChord){
+    chordDiv.classList.remove("pulse");
+    void chordDiv.offsetWidth;
+    chordDiv.classList.add("pulse");
+    lastChord = result.name;
+  }
+  
+  document.getElementById("roman").textContent=result.roman? "Roman numeral: "+result.roman : "";
+}
+
+// MIDI
+if(navigator.requestMIDIAccess) navigator.requestMIDIAccess().then(ma=>{
+  for(let input of ma.inputs.values()) input.onmidimessage=msg=>{
+    const [cmd,note,vel]=msg.data;
+    if(cmd===144&&vel>0){activeNotes.add(note);activateKey(note);}
+    else if(cmd===128||(cmd===144&&vel===0)){activeNotes.delete(note);deactivateKey(note);}
+    updateDisplay();
+  };
+});
+
+// Computer keyboard
+window.addEventListener("keydown",e=>{
+  const note=keyMap[e.key];
+  if(note&&!activeNotes.has(note)){activeNotes.add(note);activateKey(note);updateDisplay();}
+});
+window.addEventListener("keyup",e=>{
+  const note=keyMap[e.key];
+  if(note){activeNotes.delete(note);deactivateKey(note);updateDisplay();}
+});
+
+// Mouse
+piano.addEventListener("mousedown",e=>{
+  const midi=e.target.dataset.midi;
+  if(midi){activeNotes.add(+midi);activateKey(+midi);updateDisplay();}
+});
+piano.addEventListener("mouseup",e=>{
+  const midi=e.target.dataset.midi;
+  if(midi){activeNotes.delete(+midi);deactivateKey(+midi);updateDisplay();}
+});
+</script>
+</body>
+</html>
