@@ -102,7 +102,7 @@
 <script src="https://cdnjs.cloudflare.com/ajax/libs/tone/14.8.39/Tone.js"></script>
 <script>
 if ('serviceWorker' in navigator) {
-  navigator.serviceWorker.register('sw.js')
+  navigator.serviceWorker.register('/sw.js')
     .then(() => console.log('Service Worker Registered'));
 }
 const { Note, Chord, Key, Scale } = Tonal;
