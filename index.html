@@ -38,9 +38,10 @@
     display: flex;
     justify-content: center;
     margin: 40px auto;
-    width: fit-content;
-    user-select: none;
-    overflow: hidden; /* Prevent horizontal scrollbar from black keys */
+  width: fit-content;
+  user-select: none;
+  overflow-x: auto; /* allow horizontal scrolling for longer keyboards */
+  padding-bottom: 8px;
   }
   .white {
     width: 50px;
@@ -96,6 +97,11 @@
 <div id="chord">Chord: </div>
 <div id="roman">Roman numeral: </div>
 
+  <div id="history" aria-live="polite">
+    <h3 style="margin-top:18px;color:#ffcc00">Last 5 chords</h3>
+    <div id="historyList" style="display:flex;gap:8px;flex-wrap:wrap;justify-content:center;margin:6px auto;padding:0;max-width:560px;color:#ddd"></div>
+  </div>
+
 <div class="piano" id="piano"></div>
 
 <script src="https://cdn.jsdelivr.net/npm/@tonaljs/tonal/browser/tonal.min.js"></script>
@@ -126,7 +132,8 @@ const pianoSampler = new Tone.Sampler({
 const keyMap = { 'a':60,'w':61,'s':62,'e':63,'d':64,'f':65,'t':66,'g':67,'y':68,'h':69,'u':70,'j':71,'k':72 };
 
 // Piano UI
-const startNote=60,numKeys=24;
+// show a longer keyboard: start lower and include 48 keys (4 octaves)
+const startNote=48, numKeys=48;
 const piano=document.getElementById("piano");
 const keyElements={};
 const whiteOrder=[0,2,4,5,7,9,11];
@@ -156,7 +163,7 @@ function detectChord(notes){
   // Convert to pitch classes for reliable detection
   const pitchClasses = notes.map(n => Note.pitchClass(n));
   const detected = Chord.detect(pitchClasses);
-  if(detected.length===0) return {name:"Unrecognized chord",roman:"",color:"tomato"};
+  if(detected.length===0) return {name:"",roman:"",color:"tomato"};
 
   const chordName = detected[0];
   
@@ -182,6 +189,34 @@ function detectChord(notes){
 }
 
 let lastChord = "";
+const chordHistory = [];
+const maxHistory = 5;
+let stableTimer = null;
+let stableCandidate = "";
+
+function pushHistory(entry){
+  if(!entry || entry.trim()==="") return;
+  // add to the end so newest appears on the right
+  chordHistory.push({name:entry});
+  if(chordHistory.length>maxHistory) chordHistory.shift();
+  renderHistory();
+}
+
+function renderHistory(){
+  const container = document.getElementById('historyList');
+  if(!container) return;
+  container.innerHTML = '';
+  chordHistory.forEach(item=>{
+    const span = document.createElement('span');
+    span.textContent = item.name;
+    span.style.background = '#1e1e1e';
+    span.style.padding = '6px 10px';
+    span.style.borderRadius = '6px';
+    span.style.color = '#ffcc00';
+    span.style.fontWeight = '600';
+    container.appendChild(span);
+  });
+}
 
 function updateDisplay(){
   const notes = Array.from(activeNotes).sort((a,b)=>a-b).map(Note.fromMidi);
@@ -196,6 +231,22 @@ function updateDisplay(){
     chordDiv.classList.remove("pulse");
     void chordDiv.offsetWidth;
     chordDiv.classList.add("pulse");
+    // Cancel any pending stability timer when chord changes
+    if(stableTimer){ clearTimeout(stableTimer); stableTimer = null; stableCandidate = ""; }
+
+    // Start a stability timer: only record to history if chord remains for >500ms
+    if(result.name && result.name !== "Unrecognized chord"){
+      stableCandidate = result.name;
+      stableTimer = setTimeout(()=>{
+        // Only push if the displayed chord is still the same candidate
+        if(lastChord === stableCandidate){
+          pushHistory(stableCandidate);
+        }
+        stableTimer = null;
+        stableCandidate = "";
+      }, 500);
+    }
+
     lastChord = result.name;
   }
   
