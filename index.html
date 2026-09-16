@@ -2,8 +2,9 @@
 <html lang="en">
 <head>
 <meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
 <link rel="manifest" href="manifest.json">
-<title>Chord Detector 🎹</title>
+<title>Chord Analyzer 🎹</title>
 <style>
   body {
     background: #121212;
@@ -11,21 +12,22 @@
     font-family: "Segoe UI", sans-serif;
     text-align: center;
     padding: 20px;
-    overflow-x: hidden; /* Prevent horizontal scrollbar */
+    overflow-x: hidden;
   }
-  h1 { color: #ffcc00; }
-  p { color: #aaa; margin-bottom: 20px; }
+  h1 { color: #ffcc00; margin-bottom: 6px; }
+  .subtitle { color: #aaa; margin-bottom: 18px; font-size: 0.95em; }
 
-  #notes, #chord, #roman {
-    margin-top: 10px;
+  #notes, #chord, #roman, #scaleNotes {
+    margin-top: 8px;
     font-weight: bold;
-    font-size: 1.2em;
+    font-size: 1.15em;
     transition: color 0.2s;
   }
+  #scaleNotes { color: #8ab4f8; font-weight: 500; font-size: 1em; }
 
   select {
     font-size: 1em;
-    margin-top: 10px;
+    margin: 8px 0;
     padding: 5px 10px;
     background: #222;
     color: #eee;
@@ -37,11 +39,13 @@
     position: relative;
     display: flex;
     justify-content: center;
-    margin: 40px auto;
-  width: fit-content;
-  user-select: none;
-  overflow-x: auto; /* allow horizontal scrolling for longer keyboards */
-  padding-bottom: 8px;
+    margin: 36px auto;
+    width: fit-content;
+    user-select: none;
+    -webkit-user-select: none;
+    overflow-x: auto;
+    padding-bottom: 8px;
+    touch-action: none;
   }
   .white {
     width: 50px;
@@ -56,6 +60,9 @@
     box-shadow: 0 4px 6px rgba(0,0,0,0.4);
   }
   .white.active { background: #ffcc00; }
+  .white.in-scale { background: #e8f0fe; }
+  .white.active.in-scale { background: #ffcc00; }
+
   .black {
     width: 32px;
     height: 120px;
@@ -69,22 +76,49 @@
     transition: background 0.15s;
   }
   .black.active { background: #ffcc00; }
+  .black.in-scale { background: #555; }
+  .black.active.in-scale { background: #ffcc00; }
 
   @keyframes pulse {
     0% { transform: scale(1); opacity: 1; }
-    50% { transform: scale(1.1); opacity: 0.8; }
+    50% { transform: scale(1.08); opacity: 0.85; }
     100% { transform: scale(1); opacity: 1; }
   }
-  #chord.pulse {
-    animation: pulse 0.3s ease;
+  #chord.pulse { animation: pulse 0.3s ease; }
+
+  #history h3 {
+    margin-top: 18px;
+    color: #ffcc00;
+    font-size: 1em;
+  }
+  #historyList {
+    display: flex;
+    gap: 8px;
+    flex-wrap: wrap;
+    justify-content: center;
+    margin: 6px auto;
+    max-width: 560px;
+  }
+  #historyList span {
+    background: #1e1e1e;
+    padding: 6px 10px;
+    border-radius: 6px;
+    color: #ffcc00;
+    font-weight: 600;
+  }
+
+  .tip {
+    color: #777;
+    font-size: 0.85em;
+    margin-top: 12px;
   }
 </style>
 </head>
 <body>
-<h1>Chord Detector 🎹</h1>
-<p>Play with MIDI, computer keys, or mouse clicks.</p>
+<h1>Chord Analyzer 🎹</h1>
+<p class="subtitle">Learn chords, scales, and how notes fit together</p>
 
-<label for="keySelect">Choose a key: </label>
+<label for="keySelect">Key / Scale: </label>
 <select id="keySelect">
   <option>C major</option><option>G major</option><option>D major</option>
   <option>A major</option><option>E major</option><option>B major</option>
@@ -93,23 +127,25 @@
   <option>B minor</option><option>F minor</option>
 </select>
 
+<div id="scaleNotes">Scale: –</div>
 <div id="notes">Notes: </div>
 <div id="chord">Chord: </div>
 <div id="roman">Roman numeral: </div>
 
-  <div id="history" aria-live="polite">
-    <h3 style="margin-top:18px;color:#ffcc00">Last 5 chords</h3>
-    <div id="historyList" style="display:flex;gap:8px;flex-wrap:wrap;justify-content:center;margin:6px auto;padding:0;max-width:560px;color:#ddd"></div>
-  </div>
+<div id="history" aria-live="polite">
+  <h3>Last 5 chords</h3>
+  <div id="historyList"></div>
+</div>
 
 <div class="piano" id="piano"></div>
+
+<p class="tip">MIDI · Computer keys (A W S E D F T G Y H U J K) · Touch / click</p>
 
 <script src="https://cdn.jsdelivr.net/npm/@tonaljs/tonal/browser/tonal.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/tone/14.8.39/Tone.js"></script>
 <script>
 if ('serviceWorker' in navigator) {
-  navigator.serviceWorker.register('sw.js')
-    .then(() => console.log('Service Worker Registered'));
+  navigator.serviceWorker.register('sw.js').then(() => console.log('Service Worker Registered'));
 }
 const { Note, Chord, Key, Scale } = Tonal;
 const activeNotes = new Set();
@@ -131,42 +167,62 @@ const pianoSampler = new Tone.Sampler({
 
 const keyMap = { 'a':60,'w':61,'s':62,'e':63,'d':64,'f':65,'t':66,'g':67,'y':68,'h':69,'u':70,'j':71,'k':72 };
 
-// Piano UI
-// show a longer keyboard: start lower and include 48 keys (4 octaves)
-const startNote=48, numKeys=48;
-const piano=document.getElementById("piano");
-const keyElements={};
-const whiteOrder=[0,2,4,5,7,9,11];
-for(let i=0;i<numKeys;i++){
-  const midi=startNote+i;
-  const pc=midi%12;
-  if(whiteOrder.includes(pc)){
-    const w=document.createElement("div");
-    w.className="white"; w.dataset.midi=midi;
-    piano.appendChild(w); keyElements[midi]=w;
-  }else{
-    const bw=document.createElement("div");
-    bw.className="black"; bw.dataset.midi=midi;
-    piano.lastElementChild.appendChild(bw); keyElements[midi]=bw;
+// Piano UI – 4 octaves starting at MIDI 48
+const startNote = 48, numKeys = 48;
+const piano = document.getElementById("piano");
+const keyElements = {};
+const whiteOrder = [0,2,4,5,7,9,11];
+for (let i = 0; i < numKeys; i++) {
+  const midi = startNote + i;
+  const pc = midi % 12;
+  if (whiteOrder.includes(pc)) {
+    const w = document.createElement("div");
+    w.className = "white";
+    w.dataset.midi = midi;
+    piano.appendChild(w);
+    keyElements[midi] = w;
+  } else {
+    const bw = document.createElement("div");
+    bw.className = "black";
+    bw.dataset.midi = midi;
+    piano.lastElementChild.appendChild(bw);
+    keyElements[midi] = bw;
   }
 }
 
-function playNote(midi){ pianoSampler.triggerAttack(Note.fromMidi(midi)); }
-function stopNote(midi){ pianoSampler.triggerRelease(Note.fromMidi(midi)); }
-function activateKey(midi){ if(keyElements[midi]) keyElements[midi].classList.add("active"); playNote(midi);}
-function deactivateKey(midi){ if(keyElements[midi]) keyElements[midi].classList.remove("active"); stopNote(midi);}
+function playNote(midi) { pianoSampler.triggerAttack(Note.fromMidi(midi)); }
+function stopNote(midi) { pianoSampler.triggerRelease(Note.fromMidi(midi)); }
+function activateKey(midi) {
+  if (keyElements[midi]) keyElements[midi].classList.add("active");
+  playNote(midi);
+}
+function deactivateKey(midi) {
+  if (keyElements[midi]) keyElements[midi].classList.remove("active");
+  stopNote(midi);
+}
 
-// Robust chord detection
-function detectChord(notes){
-  if(notes.length===0) return {name:"",roman:"",color:"white"};
-  
-  // Convert to pitch classes for reliable detection
+// Highlight scale notes on the piano (subtle)
+function highlightScale() {
+  const keyName = document.getElementById("keySelect").value;
+  const scaleNotes = Scale.get(keyName).notes.map(n => Note.pitchClass(n));
+  document.getElementById("scaleNotes").textContent = "Scale: " + Scale.get(keyName).notes.join("  ");
+
+  Object.values(keyElements).forEach(el => {
+    const pc = Note.pitchClass(Note.fromMidi(+el.dataset.midi));
+    if (scaleNotes.includes(pc)) el.classList.add("in-scale");
+    else el.classList.remove("in-scale");
+  });
+}
+
+// Chord detection
+function detectChord(notes) {
+  if (notes.length === 0) return { name: "", roman: "", color: "#eee" };
+
   const pitchClasses = notes.map(n => Note.pitchClass(n));
   const detected = Chord.detect(pitchClasses);
-  if(detected.length===0) return {name:"",roman:"",color:"tomato"};
+  if (detected.length === 0) return { name: "", roman: "", color: "tomato" };
 
   const chordName = detected[0];
-  
   const keyName = document.getElementById("keySelect").value;
   const [tonic, type] = keyName.split(" ");
   const scale = Scale.get(keyName).notes;
@@ -175,17 +231,17 @@ function detectChord(notes){
   const inKey = chordNotes.every(n => scale.includes(n));
 
   let roman = "";
-  if(inKey){
+  if (inKey) {
     try {
-      const keyData = type==="major"? Key.majorKey(tonic) : Key.minorKey(tonic);
-      const harmonized = type==="major"? keyData.chords : keyData.natural.chords;
+      const keyData = type === "major" ? Key.majorKey(tonic) : Key.minorKey(tonic);
+      const harmonized = type === "major" ? keyData.chords : keyData.natural.chords;
       const rootPc = chordNotes[0];
-      const idx = harmonized.findIndex(c => Chord.get(c).notes.map(Note.pitchClass)[0]===rootPc);
-      if(idx>=0) roman = type==="major"? keyData.scaleDegrees[idx] : keyData.natural.scaleDegrees[idx];
-    } catch(e){ roman=""; }
+      const idx = harmonized.findIndex(c => Chord.get(c).notes.map(Note.pitchClass)[0] === rootPc);
+      if (idx >= 0) roman = type === "major" ? keyData.scaleDegrees[idx] : keyData.natural.scaleDegrees[idx];
+    } catch (e) { roman = ""; }
   }
 
-  return {name: chordName, roman, color: inKey? "limegreen":"tomato"};
+  return { name: chordName, roman, color: inKey ? "limegreen" : "tomato" };
 }
 
 let lastChord = "";
@@ -194,94 +250,119 @@ const maxHistory = 5;
 let stableTimer = null;
 let stableCandidate = "";
 
-function pushHistory(entry){
-  if(!entry || entry.trim()==="") return;
-  // add to the end so newest appears on the right
-  chordHistory.push({name:entry});
-  if(chordHistory.length>maxHistory) chordHistory.shift();
+function pushHistory(entry) {
+  if (!entry || entry.trim() === "") return;
+  chordHistory.push({ name: entry });
+  if (chordHistory.length > maxHistory) chordHistory.shift();
   renderHistory();
 }
 
-function renderHistory(){
-  const container = document.getElementById('historyList');
-  if(!container) return;
-  container.innerHTML = '';
-  chordHistory.forEach(item=>{
-    const span = document.createElement('span');
+function renderHistory() {
+  const container = document.getElementById("historyList");
+  if (!container) return;
+  container.innerHTML = "";
+  chordHistory.forEach(item => {
+    const span = document.createElement("span");
     span.textContent = item.name;
-    span.style.background = '#1e1e1e';
-    span.style.padding = '6px 10px';
-    span.style.borderRadius = '6px';
-    span.style.color = '#ffcc00';
-    span.style.fontWeight = '600';
     container.appendChild(span);
   });
 }
 
-function updateDisplay(){
-  const notes = Array.from(activeNotes).sort((a,b)=>a-b).map(Note.fromMidi);
-  document.getElementById("notes").textContent="Notes: "+notes.join(" ");
-  
+function updateDisplay() {
+  const notes = Array.from(activeNotes).sort((a, b) => a - b).map(Note.fromMidi);
+  document.getElementById("notes").textContent = "Notes: " + (notes.length ? notes.join(" ") : "–");
+
   const result = detectChord(notes);
-  const chordDiv=document.getElementById("chord");
-  chordDiv.textContent="Chord: "+result.name;
-  chordDiv.style.color=result.color;
-  
-  if(result.name !== lastChord){
+  const chordDiv = document.getElementById("chord");
+  chordDiv.textContent = "Chord: " + (result.name || "–");
+  chordDiv.style.color = result.color;
+
+  if (result.name !== lastChord) {
     chordDiv.classList.remove("pulse");
     void chordDiv.offsetWidth;
     chordDiv.classList.add("pulse");
-    // Cancel any pending stability timer when chord changes
-    if(stableTimer){ clearTimeout(stableTimer); stableTimer = null; stableCandidate = ""; }
+    if (stableTimer) { clearTimeout(stableTimer); stableTimer = null; stableCandidate = ""; }
 
-    // Start a stability timer: only record to history if chord remains for >500ms
-    if(result.name && result.name !== "Unrecognized chord"){
+    if (result.name) {
       stableCandidate = result.name;
-      stableTimer = setTimeout(()=>{
-        // Only push if the displayed chord is still the same candidate
-        if(lastChord === stableCandidate){
-          pushHistory(stableCandidate);
-        }
+      stableTimer = setTimeout(() => {
+        if (lastChord === stableCandidate) pushHistory(stableCandidate);
         stableTimer = null;
         stableCandidate = "";
       }, 500);
     }
-
     lastChord = result.name;
   }
-  
-  document.getElementById("roman").textContent=result.roman? "Roman numeral: "+result.roman : "Roman numeral: –";
+
+  document.getElementById("roman").textContent = result.roman
+    ? "Roman numeral: " + result.roman
+    : "Roman numeral: –";
 }
 
+// Key change → update scale display + highlighting
+document.getElementById("keySelect").addEventListener("change", () => {
+  highlightScale();
+  updateDisplay();
+});
+highlightScale(); // initial
+
 // MIDI
-if(navigator.requestMIDIAccess) navigator.requestMIDIAccess().then(ma=>{
-  for(let input of ma.inputs.values()) input.onmidimessage=msg=>{
-    const [cmd,note,vel]=msg.data;
-    if(cmd===144&&vel>0){activeNotes.add(note);activateKey(note);}
-    else if(cmd===128||(cmd===144&&vel===0)){activeNotes.delete(note);deactivateKey(note);}
+if (navigator.requestMIDIAccess) {
+  navigator.requestMIDIAccess().then(ma => {
+    for (let input of ma.inputs.values()) {
+      input.onmidimessage = msg => {
+        const [cmd, note, vel] = msg.data;
+        if (cmd === 144 && vel > 0) { activeNotes.add(note); activateKey(note); }
+        else if (cmd === 128 || (cmd === 144 && vel === 0)) { activeNotes.delete(note); deactivateKey(note); }
+        updateDisplay();
+      };
+    }
+  });
+}
+
+// Computer keyboard
+window.addEventListener("keydown", e => {
+  if (e.repeat) return;
+  const note = keyMap[e.key.toLowerCase()];
+  if (note && !activeNotes.has(note)) {
+    activeNotes.add(note);
+    activateKey(note);
     updateDisplay();
-  };
+  }
+});
+window.addEventListener("keyup", e => {
+  const note = keyMap[e.key.toLowerCase()];
+  if (note) {
+    activeNotes.delete(note);
+    deactivateKey(note);
+    updateDisplay();
+  }
 });
 
-// Keyboard
-window.addEventListener("keydown",e=>{
-  const note=keyMap[e.key];
-  if(note&&!activeNotes.has(note)){activeNotes.add(note);activateKey(note);updateDisplay();}
-});
-window.addEventListener("keyup",e=>{
-  const note=keyMap[e.key];
-  if(note){activeNotes.delete(note);deactivateKey(note);updateDisplay();}
-});
-
-// Mouse
-piano.addEventListener("mousedown",e=>{
-  const midi=e.target.dataset.midi;
-  if(midi){activeNotes.add(+midi);activateKey(+midi);updateDisplay();}
-});
-piano.addEventListener("mouseup",e=>{
-  const midi=e.target.dataset.midi;
-  if(midi){activeNotes.delete(+midi);deactivateKey(+midi);updateDisplay();}
-});
+// Pointer events (mouse + touch)
+function pointerDown(e) {
+  const midi = e.target.dataset.midi;
+  if (!midi) return;
+  e.preventDefault();
+  const m = +midi;
+  if (!activeNotes.has(m)) {
+    activeNotes.add(m);
+    activateKey(m);
+    updateDisplay();
+  }
+}
+function pointerUp(e) {
+  const midi = e.target.dataset.midi;
+  if (!midi) return;
+  const m = +midi;
+  activeNotes.delete(m);
+  deactivateKey(m);
+  updateDisplay();
+}
+piano.addEventListener("pointerdown", pointerDown);
+piano.addEventListener("pointerup", pointerUp);
+piano.addEventListener("pointerleave", pointerUp);
+piano.addEventListener("pointercancel", pointerUp);
 </script>
 </body>
 </html>
