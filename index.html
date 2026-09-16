@@ -41,11 +41,14 @@
     justify-content: center;
     margin: 36px auto;
     width: fit-content;
+    max-width: 100%;
     user-select: none;
     -webkit-user-select: none;
     overflow-x: auto;
+    -webkit-overflow-scrolling: touch;
     padding-bottom: 8px;
-    touch-action: none;
+    touch-action: pan-x;
+    scroll-behavior: smooth;
   }
   .white {
     width: 50px;
@@ -58,6 +61,7 @@
     z-index: 1;
     transition: background 0.15s;
     box-shadow: 0 4px 6px rgba(0,0,0,0.4);
+    flex-shrink: 0;
   }
   .white.active { background: #ffcc00; }
   .white.in-scale { background: #e8f0fe; }
@@ -78,6 +82,23 @@
   .black.active { background: #ffcc00; }
   .black.in-scale { background: #555; }
   .black.active.in-scale { background: #ffcc00; }
+
+  /* Mobile: slightly narrower keys so more of the keyboard is visible */
+  @media (max-width: 700px) {
+    body { padding: 12px 8px; }
+    .white {
+      width: 36px;
+      height: 160px;
+    }
+    .black {
+      width: 24px;
+      height: 100px;
+      left: 24px;
+    }
+    #notes, #chord, #roman, #scaleNotes {
+      font-size: 1.05em;
+    }
+  }
 
   @keyframes pulse {
     0% { transform: scale(1); opacity: 1; }
@@ -141,7 +162,6 @@
 
 <p class="tip">MIDI · Computer keys (A W S E D F T G Y H U J K) · Touch / click</p>
 
-<!-- Official Tonal browser build that exposes the global Tonal -->
 <script src="https://cdn.jsdelivr.net/npm/tonal/browser/tonal.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/tone/14.8.39/Tone.js"></script>
 <script>
@@ -209,6 +229,20 @@
       keyElements[midi] = bw;
     }
   }
+
+  // Center the piano on load so middle C area is visible on mobile
+  function centerPiano() {
+    // Scroll so roughly the middle of the keyboard is in view
+    const target = piano.scrollWidth / 2 - piano.clientWidth / 2;
+    piano.scrollLeft = Math.max(0, target);
+  }
+  // Run after layout
+  requestAnimationFrame(() => {
+    centerPiano();
+    // Also after a short delay in case fonts/images affect width
+    setTimeout(centerPiano, 100);
+  });
+  window.addEventListener("resize", centerPiano);
 
   function playNote(midi) {
     ensureAudio().then(() => {
@@ -383,30 +417,47 @@
     }
   });
 
-  // Pointer (mouse + touch)
+  // More robust pointer handling (prevents stuck keys)
+  const activePointers = new Map(); // pointerId -> midi
+
   function pointerDown(e) {
-    const midi = e.target.dataset.midi;
-    if (!midi) return;
+    const el = e.target.closest("[data-midi]");
+    if (!el) return;
+    const midi = +el.dataset.midi;
     e.preventDefault();
-    const m = +midi;
-    if (!activeNotes.has(m)) {
-      activeNotes.add(m);
-      activateKey(m);
+    try { el.setPointerCapture(e.pointerId); } catch (_) {}
+    activePointers.set(e.pointerId, midi);
+    if (!activeNotes.has(midi)) {
+      activeNotes.add(midi);
+      activateKey(midi);
       updateDisplay();
     }
   }
+
   function pointerUp(e) {
-    const midi = e.target.dataset.midi;
-    if (!midi) return;
-    const m = +midi;
-    activeNotes.delete(m);
-    deactivateKey(m);
+    const midi = activePointers.get(e.pointerId);
+    if (midi === undefined) return;
+    activePointers.delete(e.pointerId);
+    try { e.target.releasePointerCapture?.(e.pointerId); } catch (_) {}
+    activeNotes.delete(midi);
+    deactivateKey(midi);
     updateDisplay();
   }
+
   piano.addEventListener("pointerdown", pointerDown);
   piano.addEventListener("pointerup", pointerUp);
-  piano.addEventListener("pointerleave", pointerUp);
   piano.addEventListener("pointercancel", pointerUp);
+  // Also clear on leave of the whole piano (safety net)
+  piano.addEventListener("pointerleave", e => {
+    if (e.target === piano) {
+      activePointers.forEach((midi) => {
+        activeNotes.delete(midi);
+        deactivateKey(midi);
+      });
+      activePointers.clear();
+      updateDisplay();
+    }
+  });
 })();
 </script>
 </body>
