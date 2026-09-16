@@ -144,225 +144,273 @@
 <script src="https://cdn.jsdelivr.net/npm/@tonaljs/tonal/browser/tonal.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/tone/14.8.39/Tone.js"></script>
 <script>
-if ('serviceWorker' in navigator) {
-  navigator.serviceWorker.register('sw.js').then(() => console.log('Service Worker Registered'));
-}
-const { Note, Chord, Key, Scale } = Tonal;
-const activeNotes = new Set();
-
-const pianoSampler = new Tone.Sampler({
-  urls: {
-    "A0":"A0.mp3","C1":"C1.mp3","D#1":"Ds1.mp3","F#1":"Fs1.mp3",
-    "A1":"A1.mp3","C2":"C2.mp3","D#2":"Ds2.mp3","F#2":"Fs2.mp3",
-    "A2":"A2.mp3","C3":"C3.mp3","D#3":"Ds3.mp3","F#3":"Fs3.mp3",
-    "A3":"A3.mp3","C4":"C4.mp3","D#4":"Ds4.mp3","F#4":"Fs4.mp3",
-    "A4":"A4.mp3","C5":"C5.mp3","D#5":"Ds5.mp3","F#5":"Fs5.mp3",
-    "A5":"A5.mp3","C6":"C6.mp3","D#6":"Ds6.mp3","F#6":"Fs6.mp3",
-    "A6":"A6.mp3","C7":"C7.mp3","D#7":"Ds7.mp3","F#7":"Fs7.mp3",
-    "A7":"A7.mp3","C8":"C8.mp3"
-  },
-  release: 2,
-  baseUrl: "https://tonejs.github.io/audio/salamander/"
-}).toDestination();
-
-const keyMap = { 'a':60,'w':61,'s':62,'e':63,'d':64,'f':65,'t':66,'g':67,'y':68,'h':69,'u':70,'j':71,'k':72 };
-
-// Piano UI – 4 octaves starting at MIDI 48
-const startNote = 48, numKeys = 48;
-const piano = document.getElementById("piano");
-const keyElements = {};
-const whiteOrder = [0,2,4,5,7,9,11];
-for (let i = 0; i < numKeys; i++) {
-  const midi = startNote + i;
-  const pc = midi % 12;
-  if (whiteOrder.includes(pc)) {
-    const w = document.createElement("div");
-    w.className = "white";
-    w.dataset.midi = midi;
-    piano.appendChild(w);
-    keyElements[midi] = w;
-  } else {
-    const bw = document.createElement("div");
-    bw.className = "black";
-    bw.dataset.midi = midi;
-    piano.lastElementChild.appendChild(bw);
-    keyElements[midi] = bw;
+(function () {
+  // Safety: wait until both libraries are present
+  if (typeof Tonal === "undefined" || typeof Tone === "undefined") {
+    console.error("Tonal or Tone failed to load");
+    return;
   }
-}
 
-function playNote(midi) { pianoSampler.triggerAttack(Note.fromMidi(midi)); }
-function stopNote(midi) { pianoSampler.triggerRelease(Note.fromMidi(midi)); }
-function activateKey(midi) {
-  if (keyElements[midi]) keyElements[midi].classList.add("active");
-  playNote(midi);
-}
-function deactivateKey(midi) {
-  if (keyElements[midi]) keyElements[midi].classList.remove("active");
-  stopNote(midi);
-}
+  const { Note, Chord, Key, Scale } = Tonal;
+  const activeNotes = new Set();
 
-// Highlight scale notes on the piano (subtle)
-function highlightScale() {
-  const keyName = document.getElementById("keySelect").value;
-  const scaleNotes = Scale.get(keyName).notes.map(n => Note.pitchClass(n));
-  document.getElementById("scaleNotes").textContent = "Scale: " + Scale.get(keyName).notes.join("  ");
-
-  Object.values(keyElements).forEach(el => {
-    const pc = Note.pitchClass(Note.fromMidi(+el.dataset.midi));
-    if (scaleNotes.includes(pc)) el.classList.add("in-scale");
-    else el.classList.remove("in-scale");
-  });
-}
-
-// Chord detection
-function detectChord(notes) {
-  if (notes.length === 0) return { name: "", roman: "", color: "#eee" };
-
-  const pitchClasses = notes.map(n => Note.pitchClass(n));
-  const detected = Chord.detect(pitchClasses);
-  if (detected.length === 0) return { name: "", roman: "", color: "tomato" };
-
-  const chordName = detected[0];
-  const keyName = document.getElementById("keySelect").value;
-  const [tonic, type] = keyName.split(" ");
-  const scale = Scale.get(keyName).notes;
-
-  const chordNotes = Chord.get(chordName).notes.map(Note.pitchClass);
-  const inKey = chordNotes.every(n => scale.includes(n));
-
-  let roman = "";
-  if (inKey) {
+  // Audio – resume context on first user gesture
+  let audioReady = false;
+  async function ensureAudio() {
+    if (audioReady) return;
     try {
-      const keyData = type === "major" ? Key.majorKey(tonic) : Key.minorKey(tonic);
-      const harmonized = type === "major" ? keyData.chords : keyData.natural.chords;
-      const rootPc = chordNotes[0];
-      const idx = harmonized.findIndex(c => Chord.get(c).notes.map(Note.pitchClass)[0] === rootPc);
-      if (idx >= 0) roman = type === "major" ? keyData.scaleDegrees[idx] : keyData.natural.scaleDegrees[idx];
-    } catch (e) { roman = ""; }
-  }
-
-  return { name: chordName, roman, color: inKey ? "limegreen" : "tomato" };
-}
-
-let lastChord = "";
-const chordHistory = [];
-const maxHistory = 5;
-let stableTimer = null;
-let stableCandidate = "";
-
-function pushHistory(entry) {
-  if (!entry || entry.trim() === "") return;
-  chordHistory.push({ name: entry });
-  if (chordHistory.length > maxHistory) chordHistory.shift();
-  renderHistory();
-}
-
-function renderHistory() {
-  const container = document.getElementById("historyList");
-  if (!container) return;
-  container.innerHTML = "";
-  chordHistory.forEach(item => {
-    const span = document.createElement("span");
-    span.textContent = item.name;
-    container.appendChild(span);
-  });
-}
-
-function updateDisplay() {
-  const notes = Array.from(activeNotes).sort((a, b) => a - b).map(Note.fromMidi);
-  document.getElementById("notes").textContent = "Notes: " + (notes.length ? notes.join(" ") : "–");
-
-  const result = detectChord(notes);
-  const chordDiv = document.getElementById("chord");
-  chordDiv.textContent = "Chord: " + (result.name || "–");
-  chordDiv.style.color = result.color;
-
-  if (result.name !== lastChord) {
-    chordDiv.classList.remove("pulse");
-    void chordDiv.offsetWidth;
-    chordDiv.classList.add("pulse");
-    if (stableTimer) { clearTimeout(stableTimer); stableTimer = null; stableCandidate = ""; }
-
-    if (result.name) {
-      stableCandidate = result.name;
-      stableTimer = setTimeout(() => {
-        if (lastChord === stableCandidate) pushHistory(stableCandidate);
-        stableTimer = null;
-        stableCandidate = "";
-      }, 500);
+      await Tone.start();
+      audioReady = true;
+    } catch (e) {
+      console.warn("Audio start failed", e);
     }
-    lastChord = result.name;
   }
 
-  document.getElementById("roman").textContent = result.roman
-    ? "Roman numeral: " + result.roman
-    : "Roman numeral: –";
-}
+  const pianoSampler = new Tone.Sampler({
+    urls: {
+      "A0":"A0.mp3","C1":"C1.mp3","D#1":"Ds1.mp3","F#1":"Fs1.mp3",
+      "A1":"A1.mp3","C2":"C2.mp3","D#2":"Ds2.mp3","F#2":"Fs2.mp3",
+      "A2":"A2.mp3","C3":"C3.mp3","D#3":"Ds3.mp3","F#3":"Fs3.mp3",
+      "A3":"A3.mp3","C4":"C4.mp3","D#4":"Ds4.mp3","F#4":"Fs4.mp3",
+      "A4":"A4.mp3","C5":"C5.mp3","D#5":"Ds5.mp3","F#5":"Fs5.mp3",
+      "A5":"A5.mp3","C6":"C6.mp3","D#6":"Ds6.mp3","F#6":"Fs6.mp3",
+      "A6":"A6.mp3","C7":"C7.mp3","D#7":"Ds7.mp3","F#7":"Fs7.mp3",
+      "A7":"A7.mp3","C8":"C8.mp3"
+    },
+    release: 2,
+    baseUrl: "https://tonejs.github.io/audio/salamander/"
+  }).toDestination();
 
-// Key change → update scale display + highlighting
-document.getElementById("keySelect").addEventListener("change", () => {
+  const keyMap = { a:60, w:61, s:62, e:63, d:64, f:65, t:66, g:67, y:68, h:69, u:70, j:71, k:72 };
+
+  // ---- Piano UI (same reliable approach as original) ----
+  const startNote = 48, numKeys = 48;
+  const piano = document.getElementById("piano");
+  const keyElements = {};
+  const whiteOrder = [0, 2, 4, 5, 7, 9, 11];
+
+  for (let i = 0; i < numKeys; i++) {
+    const midi = startNote + i;
+    const pc = midi % 12;
+    if (whiteOrder.includes(pc)) {
+      const w = document.createElement("div");
+      w.className = "white";
+      w.dataset.midi = midi;
+      piano.appendChild(w);
+      keyElements[midi] = w;
+    } else {
+      const bw = document.createElement("div");
+      bw.className = "black";
+      bw.dataset.midi = midi;
+      // attach to the last white key so absolute positioning works
+      if (piano.lastElementChild) {
+        piano.lastElementChild.appendChild(bw);
+      }
+      keyElements[midi] = bw;
+    }
+  }
+
+  function playNote(midi) {
+    ensureAudio().then(() => {
+      try { pianoSampler.triggerAttack(Note.fromMidi(midi)); } catch (e) {}
+    });
+  }
+  function stopNote(midi) {
+    try { pianoSampler.triggerRelease(Note.fromMidi(midi)); } catch (e) {}
+  }
+  function activateKey(midi) {
+    if (keyElements[midi]) keyElements[midi].classList.add("active");
+    playNote(midi);
+  }
+  function deactivateKey(midi) {
+    if (keyElements[midi]) keyElements[midi].classList.remove("active");
+    stopNote(midi);
+  }
+
+  // ---- Scale highlighting (safe) ----
+  function highlightScale() {
+    try {
+      const keyName = document.getElementById("keySelect").value;
+      const scale = Scale.get(keyName);
+      if (!scale || !scale.notes) {
+        document.getElementById("scaleNotes").textContent = "Scale: –";
+        return;
+      }
+      document.getElementById("scaleNotes").textContent = "Scale: " + scale.notes.join("  ");
+
+      const scalePcs = scale.notes.map(n => Note.pitchClass(n));
+      Object.values(keyElements).forEach(el => {
+        const midi = +el.dataset.midi;
+        const noteName = Note.fromMidi(midi);
+        const pc = Note.pitchClass(noteName);
+        if (scalePcs.includes(pc)) el.classList.add("in-scale");
+        else el.classList.remove("in-scale");
+      });
+    } catch (err) {
+      console.warn("Scale highlight error", err);
+      document.getElementById("scaleNotes").textContent = "Scale: –";
+    }
+  }
+
+  // ---- Chord detection (same logic) ----
+  function detectChord(notes) {
+    if (notes.length === 0) return { name: "", roman: "", color: "#eee" };
+
+    const pitchClasses = notes.map(n => Note.pitchClass(n));
+    const detected = Chord.detect(pitchClasses);
+    if (!detected || detected.length === 0) return { name: "", roman: "", color: "tomato" };
+
+    const chordName = detected[0];
+    const keyName = document.getElementById("keySelect").value;
+    const [tonic, type] = keyName.split(" ");
+    const scaleNotes = Scale.get(keyName).notes || [];
+
+    const chordNotes = (Chord.get(chordName).notes || []).map(Note.pitchClass);
+    const inKey = chordNotes.every(n => scaleNotes.includes(n));
+
+    let roman = "";
+    if (inKey) {
+      try {
+        const keyData = type === "major" ? Key.majorKey(tonic) : Key.minorKey(tonic);
+        const harmonized = type === "major" ? keyData.chords : (keyData.natural && keyData.natural.chords);
+        if (harmonized) {
+          const rootPc = chordNotes[0];
+          const idx = harmonized.findIndex(c => {
+            const cn = Chord.get(c).notes || [];
+            return cn.length && Note.pitchClass(cn[0]) === rootPc;
+          });
+          if (idx >= 0) {
+            roman = type === "major"
+              ? keyData.scaleDegrees[idx]
+              : (keyData.natural && keyData.natural.scaleDegrees[idx]);
+          }
+        }
+      } catch (e) { roman = ""; }
+    }
+
+    return { name: chordName, roman, color: inKey ? "limegreen" : "tomato" };
+  }
+
+  let lastChord = "";
+  const chordHistory = [];
+  const maxHistory = 5;
+  let stableTimer = null;
+  let stableCandidate = "";
+
+  function pushHistory(entry) {
+    if (!entry || !entry.trim()) return;
+    chordHistory.push({ name: entry });
+    if (chordHistory.length > maxHistory) chordHistory.shift();
+    renderHistory();
+  }
+
+  function renderHistory() {
+    const container = document.getElementById("historyList");
+    if (!container) return;
+    container.innerHTML = "";
+    chordHistory.forEach(item => {
+      const span = document.createElement("span");
+      span.textContent = item.name;
+      container.appendChild(span);
+    });
+  }
+
+  function updateDisplay() {
+    const notes = Array.from(activeNotes).sort((a, b) => a - b).map(Note.fromMidi);
+    document.getElementById("notes").textContent = "Notes: " + (notes.length ? notes.join(" ") : "–");
+
+    const result = detectChord(notes);
+    const chordDiv = document.getElementById("chord");
+    chordDiv.textContent = "Chord: " + (result.name || "–");
+    chordDiv.style.color = result.color;
+
+    if (result.name !== lastChord) {
+      chordDiv.classList.remove("pulse");
+      void chordDiv.offsetWidth;
+      chordDiv.classList.add("pulse");
+      if (stableTimer) { clearTimeout(stableTimer); stableTimer = null; stableCandidate = ""; }
+
+      if (result.name) {
+        stableCandidate = result.name;
+        stableTimer = setTimeout(() => {
+          if (lastChord === stableCandidate) pushHistory(stableCandidate);
+          stableTimer = null;
+          stableCandidate = "";
+        }, 500);
+      }
+      lastChord = result.name;
+    }
+
+    document.getElementById("roman").textContent = result.roman
+      ? "Roman numeral: " + result.roman
+      : "Roman numeral: –";
+  }
+
+  // Key change
+  document.getElementById("keySelect").addEventListener("change", () => {
+    highlightScale();
+    updateDisplay();
+  });
   highlightScale();
-  updateDisplay();
-});
-highlightScale(); // initial
 
-// MIDI
-if (navigator.requestMIDIAccess) {
-  navigator.requestMIDIAccess().then(ma => {
-    for (let input of ma.inputs.values()) {
-      input.onmidimessage = msg => {
-        const [cmd, note, vel] = msg.data;
-        if (cmd === 144 && vel > 0) { activeNotes.add(note); activateKey(note); }
-        else if (cmd === 128 || (cmd === 144 && vel === 0)) { activeNotes.delete(note); deactivateKey(note); }
-        updateDisplay();
-      };
+  // MIDI
+  if (navigator.requestMIDIAccess) {
+    navigator.requestMIDIAccess().then(ma => {
+      for (let input of ma.inputs.values()) {
+        input.onmidimessage = msg => {
+          const [cmd, note, vel] = msg.data;
+          if (cmd === 144 && vel > 0) { activeNotes.add(note); activateKey(note); }
+          else if (cmd === 128 || (cmd === 144 && vel === 0)) { activeNotes.delete(note); deactivateKey(note); }
+          updateDisplay();
+        };
+      }
+    }).catch(() => {});
+  }
+
+  // Computer keyboard
+  window.addEventListener("keydown", e => {
+    if (e.repeat) return;
+    const note = keyMap[e.key.toLowerCase()];
+    if (note && !activeNotes.has(note)) {
+      activeNotes.add(note);
+      activateKey(note);
+      updateDisplay();
     }
   });
-}
+  window.addEventListener("keyup", e => {
+    const note = keyMap[e.key.toLowerCase()];
+    if (note) {
+      activeNotes.delete(note);
+      deactivateKey(note);
+      updateDisplay();
+    }
+  });
 
-// Computer keyboard
-window.addEventListener("keydown", e => {
-  if (e.repeat) return;
-  const note = keyMap[e.key.toLowerCase()];
-  if (note && !activeNotes.has(note)) {
-    activeNotes.add(note);
-    activateKey(note);
+  // Pointer (mouse + touch)
+  function pointerDown(e) {
+    const midi = e.target.dataset.midi;
+    if (!midi) return;
+    e.preventDefault();
+    const m = +midi;
+    if (!activeNotes.has(m)) {
+      activeNotes.add(m);
+      activateKey(m);
+      updateDisplay();
+    }
+  }
+  function pointerUp(e) {
+    const midi = e.target.dataset.midi;
+    if (!midi) return;
+    const m = +midi;
+    activeNotes.delete(m);
+    deactivateKey(m);
     updateDisplay();
   }
-});
-window.addEventListener("keyup", e => {
-  const note = keyMap[e.key.toLowerCase()];
-  if (note) {
-    activeNotes.delete(note);
-    deactivateKey(note);
-    updateDisplay();
-  }
-});
-
-// Pointer events (mouse + touch)
-function pointerDown(e) {
-  const midi = e.target.dataset.midi;
-  if (!midi) return;
-  e.preventDefault();
-  const m = +midi;
-  if (!activeNotes.has(m)) {
-    activeNotes.add(m);
-    activateKey(m);
-    updateDisplay();
-  }
-}
-function pointerUp(e) {
-  const midi = e.target.dataset.midi;
-  if (!midi) return;
-  const m = +midi;
-  activeNotes.delete(m);
-  deactivateKey(m);
-  updateDisplay();
-}
-piano.addEventListener("pointerdown", pointerDown);
-piano.addEventListener("pointerup", pointerUp);
-piano.addEventListener("pointerleave", pointerUp);
-piano.addEventListener("pointercancel", pointerUp);
+  piano.addEventListener("pointerdown", pointerDown);
+  piano.addEventListener("pointerup", pointerUp);
+  piano.addEventListener("pointerleave", pointerUp);
+  piano.addEventListener("pointercancel", pointerUp);
+})();
 </script>
 </body>
 </html>
