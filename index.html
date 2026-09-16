@@ -141,20 +141,21 @@
 
 <p class="tip">MIDI · Computer keys (A W S E D F T G Y H U J K) · Touch / click</p>
 
-<script src="https://cdn.jsdelivr.net/npm/@tonaljs/tonal/browser/tonal.min.js"></script>
+<!-- Official Tonal browser build that exposes the global Tonal -->
+<script src="https://cdn.jsdelivr.net/npm/tonal/browser/tonal.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/tone/14.8.39/Tone.js"></script>
 <script>
 (function () {
-  // Safety: wait until both libraries are present
   if (typeof Tonal === "undefined" || typeof Tone === "undefined") {
     console.error("Tonal or Tone failed to load");
+    document.getElementById("scaleNotes").textContent = "Libraries failed to load – check network";
     return;
   }
 
   const { Note, Chord, Key, Scale } = Tonal;
   const activeNotes = new Set();
 
-  // Audio – resume context on first user gesture
+  // Resume audio context on first user gesture (required by browsers)
   let audioReady = false;
   async function ensureAudio() {
     if (audioReady) return;
@@ -183,7 +184,7 @@
 
   const keyMap = { a:60, w:61, s:62, e:63, d:64, f:65, t:66, g:67, y:68, h:69, u:70, j:71, k:72 };
 
-  // ---- Piano UI (same reliable approach as original) ----
+  // Piano UI
   const startNote = 48, numKeys = 48;
   const piano = document.getElementById("piano");
   const keyElements = {};
@@ -202,7 +203,6 @@
       const bw = document.createElement("div");
       bw.className = "black";
       bw.dataset.midi = midi;
-      // attach to the last white key so absolute positioning works
       if (piano.lastElementChild) {
         piano.lastElementChild.appendChild(bw);
       }
@@ -227,7 +227,6 @@
     stopNote(midi);
   }
 
-  // ---- Scale highlighting (safe) ----
   function highlightScale() {
     try {
       const keyName = document.getElementById("keySelect").value;
@@ -252,7 +251,6 @@
     }
   }
 
-  // ---- Chord detection (same logic) ----
   function detectChord(notes) {
     if (notes.length === 0) return { name: "", roman: "", color: "#eee" };
 
@@ -263,7 +261,7 @@
     const chordName = detected[0];
     const keyName = document.getElementById("keySelect").value;
     const [tonic, type] = keyName.split(" ");
-    const scaleNotes = Scale.get(keyName).notes || [];
+    const scaleNotes = (Scale.get(keyName).notes) || [];
 
     const chordNotes = (Chord.get(chordName).notes || []).map(Note.pitchClass);
     const inKey = chordNotes.every(n => scaleNotes.includes(n));
@@ -346,7 +344,6 @@
       : "Roman numeral: –";
   }
 
-  // Key change
   document.getElementById("keySelect").addEventListener("change", () => {
     highlightScale();
     updateDisplay();
