@@ -1,10 +1,10 @@
 {
-  "name": "My App",
-  "short_name": "App",
+  "name": "Chord Analyzer",
+  "short_name": "Chords",
   "start_url": "index.html",
   "display": "standalone",
-  "background_color": "#ffffff",
-  "theme_color": "#000000",
+  "background_color": "#121212",
+  "theme_color": "#ffcc00",
   "icons": [
     {
       "src": "piano.png",
